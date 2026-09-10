@@ -35,7 +35,6 @@ ENV HOST=0.0.0.0 \
     PORT=7777 \
     DEVICES_FILE=/etc/homelab-updater/devices.yaml \
     ALLOWED_SIGNERS_FILE=/etc/homelab-updater/allowed_signers \
-    DEFAULT_SSH_KEY_PATH=/etc/homelab-updater/keys/id_ed25519 \
     STAGING_DIR=/tmp/homelab-staging \
     REQUIRE_COMMIT_SIGNATURE=true
 
