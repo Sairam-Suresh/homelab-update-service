@@ -1,0 +1,24 @@
+# Example Caddy reverse proxy configuration for Homelab Updater Service
+# Directs incoming deployment webhooks from GitHub Actions to the homelab-updater daemon
+
+updater.homelab.yourdomain.com {
+    # Optional IP filtering / Tailscale / Cloudflare tunnel restrictions:
+    # @allowed remote_ip 100.64.0.0/10 192.168.1.0/24
+    # handle @allowed {
+    #     reverse_proxy homelab-updater:7777
+    # }
+    # respond "Access denied" 403
+
+    # Reverse proxy to the homelab-updater service container or localhost:7777
+    reverse_proxy homelab-updater:7777 {
+        # Pass client IP headers
+        header_up X-Real-IP {remote_host}
+        header_up X-Forwarded-For {remote_host}
+        header_up X-Forwarded-Proto {scheme}
+    }
+
+    # Logging
+    log {
+        output file /var/log/caddy/updater_access.log
+    }
+}

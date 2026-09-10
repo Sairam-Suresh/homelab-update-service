@@ -1,0 +1,9 @@
+# /etc/homelab-updater/allowed_signers
+# Git SSH allowed signers file format:
+# <identity/email> <key-type> <public-key> [comment]
+#
+# Mount this file into the updater container at /etc/homelab-updater/allowed_signers
+#
+# Examples:
+maintainer@example.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExampleKey1234567890MaintainerKey
+backup-admin@example.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExampleKey0987654321BackupAdminKey

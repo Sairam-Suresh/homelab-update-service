@@ -1,0 +1,28 @@
+# Example deploy.yaml to place inside each service folder
+# (e.g., homelab/services/s-workspaces-gateway/deploy.yaml)
+
+# 1. Target device identifier matching an entry in /etc/homelab-updater/devices.yaml
+device: tower
+
+# 2. Destination directory on target system where folder contents will be synced
+target_dir: /opt/homelab/services/s-workspaces-gateway
+
+# 3. Optional bootstrap script to run on target after rsync (defaults to bootstrap.sh)
+bootstrap_script: bootstrap.sh
+
+# 4. Optional environment variables exported during bootstrap execution
+environment:
+  DEPLOY_ENV: production
+  COMPOSE_PROJECT_NAME: s-workspaces-gateway
+
+# 5. Optional pre-deploy command run on target system prior to file sync
+pre_deploy_command: "docker compose down || true"
+
+# 6. Optional post-deploy command run on target system after bootstrap
+post_deploy_command: "docker compose ps"
+
+# 7. Optional rsync exclusions
+rsync_exclude:
+  - ".git*"
+  - "__pycache__"
+  - "*.tmp"

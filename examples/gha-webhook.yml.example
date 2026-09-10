@@ -1,0 +1,76 @@
+# Example GitHub Actions workflow for your homelab monorepo (.github/workflows/deploy.yml)
+# Triggers automated deployment when a service folder is updated on main branch.
+
+name: Deploy Homelab Services
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "services/**"
+      - "apps/**"
+
+jobs:
+  detect-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout monorepo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2 # Needed to compare changes with HEAD~1
+
+      - name: Detect changed service directories
+        id: changed-services
+        run: |
+          # Detect unique top-level service directories modified in this commit
+          CHANGED_PATHS=$(git diff --name-only HEAD~1 HEAD | grep -E '^(services|apps)/[^/]+' | cut -d/ -f1,2 | sort -u)
+          echo "Changed paths:"
+          echo "$CHANGED_PATHS"
+          
+          # Convert newline separated list to JSON array for matrix deployment
+          JSON_PATHS=$(echo "$CHANGED_PATHS" | jq -R -s -c 'split("\n") | map(select(length > 0))')
+          echo "matrix=$JSON_PATHS" >> $GITHUB_OUTPUT
+
+    outputs:
+      matrix: ${{ steps.changed-services.outputs.matrix }}
+
+  deploy:
+    needs: detect-and-deploy
+    if: ${{ needs.detect-and-deploy.outputs.matrix != '[]' && needs.detect-and-deploy.outputs.matrix != '' }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        service_path: ${{ fromJson(needs.detect-and-deploy.outputs.matrix) }}
+      fail-fast: false
+
+    steps:
+      - name: Trigger Homelab Updater Webhook for ${{ matrix.service_path }}
+        env:
+          UPDATER_URL: ${{ secrets.HOMELAB_UPDATER_URL }} # e.g. https://updater.homelab.yourdomain.com/api/v1/deploy
+          UPDATER_TOKEN: ${{ secrets.HOMELAB_UPDATER_SECRET }}
+        run: |
+          echo "Deploying service path: ${{ matrix.service_path }} at commit ${{ github.sha }}"
+          
+          RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "${UPDATER_URL}" \
+            -H "Content-Type: application/json" \
+            -H "X-Homelab-Token: ${UPDATER_TOKEN}" \
+            -d '{
+              "repo_url": "${{ github.server_url }}/${{ github.repository }}.git",
+              "commit_sha": "${{ github.sha }}",
+              "repo_relative_path": "${{ matrix.service_path }}",
+              "git_branch": "${{ github.ref_name }}"
+            }')
+          
+          HTTP_BODY=$(echo "$RESPONSE" | sed '$d')
+          HTTP_CODE=$(echo "$RESPONSE" | tail -n 1)
+
+          echo "Response Body:"
+          echo "$HTTP_BODY" | jq . || echo "$HTTP_BODY"
+          echo "HTTP Status Code: $HTTP_CODE"
+
+          if [ "$HTTP_CODE" -ne 200 ]; then
+            echo "Deployment failed with status code $HTTP_CODE!"
+            exit 1
+          fi
+          echo "Deployment succeeded!"

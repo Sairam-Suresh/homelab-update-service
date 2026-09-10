@@ -1,0 +1,32 @@
+# /etc/homelab-updater/devices.yaml
+# Device mapping for Homelab Updater Service
+# Mount this file into the updater container at /etc/homelab-updater/devices.yaml
+
+devices:
+  # Local host deployment (the host running the container or local gateway)
+  # Uses host gateway IP (172.17.0.1) or host.docker.internal
+  local:
+    host: "172.17.0.1"
+    user: "coder"
+    port: 22
+    ssh_key_path: "/etc/homelab-updater/keys/id_ed25519"
+    connect_timeout: 10
+    strict_host_key_checking: "accept-new"
+
+  # Target remote node 1 (e.g., Tower server)
+  tower:
+    host: "192.168.1.100"
+    user: "deployer"
+    port: 22
+    ssh_key_path: "/etc/homelab-updater/keys/id_ed25519"
+    connect_timeout: 15
+    strict_host_key_checking: "accept-new"
+
+  # Target remote node 2 (e.g., NAS or Raspberry Pi cluster)
+  nas:
+    host: "192.168.1.150"
+    user: "homelab"
+    port: 22
+    ssh_key_path: "/etc/homelab-updater/keys/id_ed25519"
+    connect_timeout: 15
+    strict_host_key_checking: "accept-new"
