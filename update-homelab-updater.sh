@@ -12,6 +12,7 @@ cd /opt/serve/homelab
 
 echo "==> Restarting with podman-compose down and up..."
 podman-compose down --remove-orphans
+sleep 5
 podman-compose up -d
 
 echo "==> Current status:"
