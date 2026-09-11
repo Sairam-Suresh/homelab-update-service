@@ -84,3 +84,20 @@ bootstrap_script: "../escape.sh"
     with pytest.raises(ManifestError) as exc:
         load_deploy_manifest(service_dir)
     assert "must not contain directory traversal" in str(exc.value)
+
+
+def test_load_deploy_manifest_only_copy_script(tmp_path: Path):
+    service_dir = tmp_path / "script-only-service"
+    service_dir.mkdir()
+    (service_dir / "deploy.yaml").write_text(
+        """
+device: "pi"
+target_dir: "/opt/homelab/services/updater"
+bootstrap_script: "update-pod.sh"
+only_copy_script: true
+"""
+    )
+    manifest = load_deploy_manifest(service_dir)
+    assert manifest.device == "pi"
+    assert manifest.bootstrap_script == "update-pod.sh"
+    assert manifest.only_copy_script is True

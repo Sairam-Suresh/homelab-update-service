@@ -10,6 +10,11 @@ target_dir: /opt/homelab/services/s-workspaces-gateway
 # 3. Optional bootstrap script to run on target after rsync (defaults to bootstrap.sh)
 bootstrap_script: bootstrap.sh
 
+# 3b. Optional: only copy the specified script instead of syncing the entire folder
+# Useful when a new container image is released and you only need to run an update script
+# without overwriting existing files/volumes on the target host.
+only_copy_script: false
+
 # 4. Optional environment variables exported during bootstrap execution
 environment:
   DEPLOY_ENV: production

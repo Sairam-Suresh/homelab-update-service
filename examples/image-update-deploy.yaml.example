@@ -1,0 +1,27 @@
+# Example deploy.yaml for image release updates (e.g. Raspberry Pi running a container/pod)
+# Place this deploy.yaml in your repository (or service folder).
+
+# 1. Target device identifier matching an entry in /etc/homelab-updater/devices.yaml
+device: pi
+
+# 2. Destination directory on target system where host configs/compose files reside
+target_dir: /opt/homelab/services/homelab-updater
+
+# 3. Specific script to run on target (e.g. update-pod.sh)
+bootstrap_script: update-pod.sh
+
+# 4. Set only_copy_script to true:
+# Copies only the specified script to target_dir without rsyncing the entire repository.
+# Existing docker-compose.yml, mounted volume files, .env, and secrets on the Pi are safely preserved.
+only_copy_script: true
+
+# 5. Optional environment variables exported during script execution
+environment:
+  DEPLOY_ENV: production
+  APP_IMAGE: ghcr.io/your-username/homelab-update-service:latest
+
+# 6. Optional pre-deploy command run on target system prior to copying the script
+# pre_deploy_command: "echo 'Starting image update...'"
+
+# 7. Optional post-deploy command run on target system after script execution
+# post_deploy_command: "docker compose ps"

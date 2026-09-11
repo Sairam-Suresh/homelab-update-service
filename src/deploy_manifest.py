@@ -15,6 +15,10 @@ class DeployManifest(BaseModel):
         default="bootstrap.sh",
         description="Path to bootstrap script relative to service directory"
     )
+    only_copy_script: bool = Field(
+        default=False,
+        description="If true, only copy the bootstrap script to target_dir instead of syncing the entire service directory"
+    )
     environment: Dict[str, str] = Field(
         default_factory=dict,
         description="Environment variables to export before running bootstrap script"

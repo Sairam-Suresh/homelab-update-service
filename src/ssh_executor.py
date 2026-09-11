@@ -140,20 +140,102 @@ def sync_files_to_device(
     return output
 
 
+def copy_script_to_device(
+    script_path: Path | str,
+    device: DeviceConfig,
+    manifest: DeployManifest,
+    script_rel_name: str,
+    timeout_seconds: int = 300
+) -> str:
+    """
+    Copy only the specified script to the target device without syncing the entire directory.
+    Uses rsync without --delete to ensure existing device files and configurations are preserved.
+    """
+    local_script = Path(script_path).resolve()
+    if not local_script.is_file():
+        raise DeploymentExecutionError(f"Staged script does not exist: {local_script}")
+
+    target_dir = manifest.target_dir.rstrip("/")
+    target = f"{device.user}@{device.host}"
+    clean_rel_name = script_rel_name.strip().lstrip("/").removeprefix("./")
+    remote_script_path = f"{target_dir}/{clean_rel_name}"
+    remote_parent_dir = str(Path(remote_script_path).parent)
+
+    # 1. Ensure remote target parent directory exists
+    run_remote_command(
+        device,
+        f"mkdir -p {shlex.quote(remote_parent_dir)}",
+        timeout_seconds=min(60, timeout_seconds)
+    )
+
+    # 2. Run pre-deploy command if defined
+    if manifest.pre_deploy_command:
+        logger.info("Running pre-deploy command on %s", device.name)
+        run_remote_command(
+            device,
+            f"cd {shlex.quote(target_dir)} && {manifest.pre_deploy_command}",
+            timeout_seconds=timeout_seconds
+        )
+
+    # 3. Construct rsync command for single script
+    ssh_opts = f"ssh -p {device.port} -o ConnectTimeout={device.connect_timeout} -o StrictHostKeyChecking={device.strict_host_key_checking}"
+    if device.ssh_key_path and Path(device.ssh_key_path).expanduser().is_file():
+        ssh_opts += f" -i {shlex.quote(str(Path(device.ssh_key_path).expanduser().resolve()))}"
+
+    rsync_cmd = [
+        "rsync",
+        "-avz",
+        "-e", ssh_opts,
+        str(local_script),
+        f"{target}:{remote_script_path}"
+    ]
+
+    logger.info("Copying script %s to %s:%s via rsync", local_script, device.name, remote_script_path)
+    try:
+        proc = subprocess.run(
+            rsync_cmd,
+            capture_output=True,
+            text=True,
+            timeout=timeout_seconds,
+            check=False
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise DeploymentExecutionError(f"rsync timed out after {timeout_seconds}s to {device.name}") from exc
+    except subprocess.SubprocessError as exc:
+        raise DeploymentExecutionError(f"rsync process failed to start: {exc}") from exc
+
+    output = (proc.stdout + "\n" + proc.stderr).strip()
+    if proc.returncode != 0:
+        raise DeploymentExecutionError(f"rsync to {device.name} failed (exit code {proc.returncode}):\n{output}")
+
+    # 4. Ensure executable permissions on remote script
+    run_remote_command(
+        device,
+        f"chmod +x {shlex.quote(remote_script_path)}",
+        timeout_seconds=min(60, timeout_seconds)
+    )
+
+    logger.info("Script copy to %s completed successfully.", device.name)
+    return f"Script '{clean_rel_name}' copied successfully to '{remote_script_path}'.\n{output}"
+
+
 def execute_bootstrap(
     device: DeviceConfig,
     manifest: DeployManifest,
+    script_name: Optional[str] = None,
     timeout_seconds: int = 300
 ) -> Optional[str]:
     """
     Execute bootstrap script and optional post-deploy commands on target device.
+    If script_name is provided, it overrides manifest.bootstrap_script.
     """
     target_dir = manifest.target_dir.rstrip("/")
     outputs: List[str] = []
 
-    if manifest.bootstrap_script:
-        script_name = manifest.bootstrap_script.lstrip("/")
-        script_full_remote = f"{target_dir}/{script_name}"
+    active_script = script_name or manifest.bootstrap_script
+    if active_script:
+        clean_script = active_script.strip().lstrip("/").removeprefix("./")
+        script_full_remote = f"{target_dir}/{clean_script}"
 
         # Build exported environment variables string
         env_exports = ""
@@ -165,11 +247,11 @@ def execute_bootstrap(
             f"if [ -f {shlex.quote(script_full_remote)} ]; then "
             f"chmod +x {shlex.quote(script_full_remote)} && "
             f"cd {shlex.quote(target_dir)} && "
-            f"{env_exports}./{shlex.quote(script_name)}; "
-            f"else echo 'Bootstrap script {script_name} not found, skipping execution.'; fi"
+            f"{env_exports}./{shlex.quote(clean_script)}; "
+            f"else echo 'Bootstrap script {clean_script} not found, skipping execution.'; fi"
         )
 
-        logger.info("Executing bootstrap script '%s' on %s", script_name, device.name)
+        logger.info("Executing bootstrap script '%s' on %s", clean_script, device.name)
         bootstrap_output = run_remote_command(device, bootstrap_cmd, timeout_seconds=timeout_seconds)
         outputs.append(f"--- Bootstrap Output ---\n{bootstrap_output}")
 

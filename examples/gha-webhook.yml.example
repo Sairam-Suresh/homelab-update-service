@@ -74,3 +74,27 @@ jobs:
             exit 1
           fi
           echo "Deployment succeeded!"
+
+  # ----------------------------------------------------------------------------
+  # Alternative Workflow: Trigger deployment after Docker image build and push
+  # (Copies only the update script instead of the full directory to your Pi)
+  # ----------------------------------------------------------------------------
+  # notify-image-release:
+  #   needs: [build-and-push-docker-image]
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - name: Trigger Pi Container Update
+  #       env:
+  #         UPDATER_URL: ${{ secrets.HOMELAB_UPDATER_URL }}
+  #         UPDATER_TOKEN: ${{ secrets.HOMELAB_UPDATER_SECRET }}
+  #       run: |
+  #         curl -fsS -X POST "${UPDATER_URL}" \
+  #           -H "Content-Type: application/json" \
+  #           -H "X-Homelab-Token: ${UPDATER_TOKEN}" \
+  #           -d '{
+  #             "repo_url": "${{ github.server_url }}/${{ github.repository }}.git",
+  #             "commit_sha": "${{ github.sha }}",
+  #             "repo_relative_path": ".",
+  #             "script": "update-pod.sh",
+  #             "only_copy_script": true
+  #           }'

@@ -1,5 +1,4 @@
-"""FastAPI application for Homelab Updater Service."""
-
+import argparse
 import logging
 import os
 import shutil
@@ -12,6 +11,7 @@ import uvicorn
 from fastapi import Depends, FastAPI, Header, HTTPException, status
 from pydantic import BaseModel, Field
 
+from src import __version__
 from src.config import Settings, get_device
 from src.deploy_manifest import load_deploy_manifest
 from src.exceptions import (
@@ -21,7 +21,11 @@ from src.exceptions import (
     ManifestError,
     SignatureVerificationError,
 )
-from src.ssh_executor import execute_bootstrap, sync_files_to_device
+from src.ssh_executor import (
+    copy_script_to_device,
+    execute_bootstrap,
+    sync_files_to_device,
+)
 from src.verifier import verify_commit_signature
 
 logging.basicConfig(
@@ -34,7 +38,7 @@ settings = Settings()
 app = FastAPI(
     title="Homelab Updater Service",
     description="Daemon service to receive deployment webhooks and deploy verified updates across target homelab devices over SSH.",
-    version="0.1.0",
+    version=__version__,
 )
 
 
@@ -42,8 +46,23 @@ class DeployRequest(BaseModel):
     """Payload model for deployment webhook."""
     repo_url: str = Field(description="Git repository clone URL (HTTPS or SSH)")
     commit_sha: str = Field(description="Exact git commit SHA to verify and deploy")
-    repo_relative_path: str = Field(description="Relative path inside the repo corresponding to the service (e.g., 'services/s-workspaces-gateway')")
+    repo_relative_path: str = Field(
+        default="",
+        description="Relative path inside the repo corresponding to the service (e.g., 'services/s-workspaces-gateway', or '' for repo root)"
+    )
     git_branch: Optional[str] = Field(default=None, description="Optional git branch name for reference")
+    script: Optional[str] = Field(
+        default=None,
+        description="Specific script to copy and execute, overriding bootstrap_script in deploy.yaml"
+    )
+    bootstrap_script: Optional[str] = Field(
+        default=None,
+        description="Alias for script"
+    )
+    only_copy_script: Optional[bool] = Field(
+        default=None,
+        description="If true, only copy the specific script instead of syncing the entire directory"
+    )
 
 
 class DeployResponse(BaseModel):
@@ -57,6 +76,8 @@ class DeployResponse(BaseModel):
     signature: Dict[str, Any]
     sync_summary: str
     bootstrap_summary: Optional[str] = None
+    only_copy_script: bool = False
+    script_executed: Optional[str] = None
 
 
 def verify_auth_token(
@@ -86,7 +107,13 @@ def verify_auth_token(
 @app.get("/healthz", tags=["System"])
 def health_check() -> Dict[str, str]:
     """Liveness probe for reverse proxies (Caddy, Traefik, etc.)."""
-    return {"status": "ok", "service": "homelab-updater"}
+    return {"status": "ok", "service": "homelab-updater", "version": __version__}
+
+
+@app.get("/version", tags=["System"])
+def get_version() -> Dict[str, str]:
+    """Return current service version."""
+    return {"version": __version__}
 
 
 @app.post(
@@ -207,30 +234,75 @@ def deploy_service(request: DeployRequest) -> DeployResponse:
                 detail=str(exc),
             )
 
-        # 7. Sync service directory to target device over SSH (rsync)
-        try:
-            sync_output = sync_files_to_device(
-                source_dir=service_dir,
-                device=device,
-                manifest=manifest,
-                timeout_seconds=settings.ssh_timeout_seconds,
-            )
-        except DeploymentExecutionError as exc:
-            logger.error("Sync failed for job %s: %s", job_id, exc)
+        # Determine target script and sync mode
+        target_script = request.script or request.bootstrap_script or manifest.bootstrap_script
+        if request.only_copy_script is not None:
+            is_only_copy_script = request.only_copy_script
+        elif request.script is not None or request.bootstrap_script is not None:
+            is_only_copy_script = True
+        else:
+            is_only_copy_script = manifest.only_copy_script
+
+        if is_only_copy_script and not target_script:
             raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"SSH rsync failed: {exc}",
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Script-only copy requested, but no script was specified in deploy.yaml or the deployment request.",
             )
 
-        # 8. Execute bootstrap script and post-deploy commands
+        # 7. File transfer to target device over SSH
+        if is_only_copy_script:
+            clean_script_name = target_script.strip().lstrip("/").removeprefix("./")
+            if ".." in clean_script_name.split("/"):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Script path '{clean_script_name}' must not contain directory traversal '..'",
+                )
+            script_file = (service_dir / clean_script_name).resolve()
+            if not script_file.is_file() or not str(script_file).startswith(str(service_dir)):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Script '{clean_script_name}' not found at '{service_dir / clean_script_name}' or escapes service directory.",
+                )
+
+            try:
+                sync_output = copy_script_to_device(
+                    script_path=script_file,
+                    device=device,
+                    manifest=manifest,
+                    script_rel_name=clean_script_name,
+                    timeout_seconds=settings.ssh_timeout_seconds,
+                )
+            except DeploymentExecutionError as exc:
+                logger.error("Script copy failed for job %s: %s", job_id, exc)
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail=f"SSH script copy failed: {exc}",
+                )
+        else:
+            try:
+                sync_output = sync_files_to_device(
+                    source_dir=service_dir,
+                    device=device,
+                    manifest=manifest,
+                    timeout_seconds=settings.ssh_timeout_seconds,
+                )
+            except DeploymentExecutionError as exc:
+                logger.error("Sync failed for job %s: %s", job_id, exc)
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail=f"SSH rsync failed: {exc}",
+                )
+
+        # 8. Execute script and post-deploy commands
         try:
             bootstrap_output = execute_bootstrap(
                 device=device,
                 manifest=manifest,
+                script_name=target_script,
                 timeout_seconds=settings.ssh_timeout_seconds,
             )
         except DeploymentExecutionError as exc:
-            logger.error("Bootstrap execution failed for job %s: %s", job_id, exc)
+            logger.error("Script execution failed for job %s: %s", job_id, exc)
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Bootstrap execution failed: {exc}",
@@ -247,6 +319,8 @@ def deploy_service(request: DeployRequest) -> DeployResponse:
             signature=sig_info,
             sync_summary=sync_output,
             bootstrap_summary=bootstrap_output,
+            only_copy_script=is_only_copy_script,
+            script_executed=target_script,
         )
 
     finally:
@@ -255,9 +329,27 @@ def deploy_service(request: DeployRequest) -> DeployResponse:
             shutil.rmtree(job_staging_dir, ignore_errors=True)
 
 
-def main() -> None:
+def main(args: Optional[list] = None) -> None:
     """CLI launcher for running the updater daemon."""
-    logger.info("Starting Homelab Updater Service on %s:%s", settings.host, settings.port)
+    parser = argparse.ArgumentParser(
+        prog="homelab-updater",
+        description="Homelab Updater Service - Continuous Deployment Daemon",
+    )
+    parser.add_argument(
+        "-v", "--version",
+        action="version",
+        version=f"%(prog)s {__version__}",
+        help="Show program version and exit",
+    )
+    parser.parse_args(args)
+
+    print(f"Homelab Updater Service v{__version__}")
+    logger.info(
+        "Starting Homelab Updater Service v%s on %s:%s",
+        __version__,
+        settings.host,
+        settings.port,
+    )
     uvicorn.run(
         "src.app:app",
         host=settings.host,

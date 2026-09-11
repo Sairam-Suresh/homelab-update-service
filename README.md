@@ -141,6 +141,10 @@ target_dir: /opt/homelab/services/s-workspaces-gateway
 # Bootstrap script relative to this service folder (defaults to bootstrap.sh)
 bootstrap_script: bootstrap.sh
 
+# Optional: Only copy the specific script instead of syncing the entire folder
+# (Prevents overwriting host configs/volumes when updating container images)
+only_copy_script: false
+
 # Environment variables exported before bootstrap execution
 environment:
   DEPLOY_ENV: production
@@ -215,6 +219,33 @@ X-Homelab-Token: <HOMELAB_UPDATER_SECRET>
 }
 ```
 
+#### Payload Fields
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `repo_url` | string | Yes | Git repository clone URL (HTTPS or SSH) |
+| `commit_sha` | string | Yes | Exact git commit SHA to verify and deploy |
+| `repo_relative_path` | string | No | Path to service folder (defaults to `""` for repository root) |
+| `git_branch` | string | No | Git branch name for reference |
+| `script` | string | No | Specific script to copy and run (overrides `bootstrap_script` in `deploy.yaml`) |
+| `only_copy_script` | boolean | No | If `true`, only copies the target script instead of syncing the entire directory |
+
+#### Triggering Container/Pod Image Updates (Script-Only Copy)
+
+When a new container image is released (e.g. built in GitHub Actions) and you need to run commands on your target device (like a Raspberry Pi) to pull the new image and restart the container without syncing or wiping out directory contents:
+
+```json
+{
+  "repo_url": "https://github.com/myuser/homelab-update-service.git",
+  "commit_sha": "f128bc16c27845f5a6b0c2ee5d9c02d1aa789912",
+  "repo_relative_path": ".",
+  "script": "update-pod.sh",
+  "only_copy_script": true
+}
+```
+
+This ensures only `update-pod.sh` is transferred to `target_dir` (without `rsync --delete`), made executable, and run to pull images and restart containers/pods safely.
+
 Response (`200 OK`):
 ```json
 {
@@ -232,6 +263,8 @@ Response (`200 OK`):
     "details": "Good \"git\" signature"
   },
   "sync_summary": "rsync output...",
-  "bootstrap_summary": "--- Bootstrap Output ---\nService successfully started!"
+  "bootstrap_summary": "--- Bootstrap Output ---\nService successfully started!",
+  "only_copy_script": false,
+  "script_executed": "bootstrap.sh"
 }
 ```

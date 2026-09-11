@@ -9,6 +9,7 @@ from src.deploy_manifest import DeployManifest
 from src.exceptions import DeploymentExecutionError
 from src.ssh_executor import (
     build_ssh_base_command,
+    copy_script_to_device,
     execute_bootstrap,
     run_remote_command,
     sync_files_to_device,
@@ -110,3 +111,78 @@ def test_execute_bootstrap(
     assert "Bootstrap done" in output
     assert "Post done" in output
     assert mock_remote_cmd.call_count == 2
+
+
+@patch("src.ssh_executor.run_remote_command")
+@patch("subprocess.run")
+def test_copy_script_to_device(
+    mock_sub_run: MagicMock,
+    mock_remote_cmd: MagicMock,
+    sample_device: DeviceConfig,
+    sample_manifest: DeployManifest,
+    tmp_path: Path,
+):
+    script_file = tmp_path / "update-pod.sh"
+    script_file.write_text("#!/bin/bash\necho update")
+
+    mock_proc = MagicMock()
+    mock_proc.returncode = 0
+    mock_proc.stdout = "sent 45 bytes"
+    mock_proc.stderr = ""
+    mock_sub_run.return_value = mock_proc
+
+    output = copy_script_to_device(
+        script_path=script_file,
+        device=sample_device,
+        manifest=sample_manifest,
+        script_rel_name="update-pod.sh",
+    )
+
+    assert "update-pod.sh" in output
+    assert "sent 45 bytes" in output
+    # Check that mkdir -p and chmod +x were executed remotely
+    assert mock_remote_cmd.call_count == 2
+    mkdir_call = mock_remote_cmd.call_args_list[0][0][1]
+    assert "mkdir -p" in mkdir_call
+    chmod_call = mock_remote_cmd.call_args_list[1][0][1]
+    assert "chmod +x" in chmod_call
+
+    # Verify rsync was called without --delete
+    rsync_args = mock_sub_run.call_args[0][0]
+    assert "--delete" not in rsync_args
+    assert str(script_file.resolve()) in rsync_args
+
+
+def test_copy_script_to_device_missing_file(
+    sample_device: DeviceConfig,
+    sample_manifest: DeployManifest,
+    tmp_path: Path,
+):
+    missing_script = tmp_path / "nonexistent.sh"
+    with pytest.raises(DeploymentExecutionError) as exc:
+        copy_script_to_device(
+            script_path=missing_script,
+            device=sample_device,
+            manifest=sample_manifest,
+            script_rel_name="nonexistent.sh",
+        )
+    assert "Staged script does not exist" in str(exc.value)
+
+
+@patch("src.ssh_executor.run_remote_command")
+def test_execute_bootstrap_script_override(
+    mock_remote_cmd: MagicMock,
+    sample_device: DeviceConfig,
+    sample_manifest: DeployManifest,
+):
+    mock_remote_cmd.side_effect = ["Custom script done", "Post done"]
+
+    output = execute_bootstrap(
+        sample_device,
+        sample_manifest,
+        script_name="custom-update.sh"
+    )
+    assert output is not None
+    assert "Custom script done" in output
+    cmd_run = mock_remote_cmd.call_args_list[0][0][1]
+    assert "custom-update.sh" in cmd_run

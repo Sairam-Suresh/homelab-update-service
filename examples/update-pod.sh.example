@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+# Example script to pull a new container image and restart the container in a pod on Raspberry Pi.
+# Place this script in your service repository (e.g. scripts/update-pod.sh or update-pod.sh).
+# Make sure it has execute permissions: chmod +x update-pod.sh
+
+set -euo pipefail
+
+echo "==> Starting container/pod update on $(hostname)..."
+
+# ==============================================================================
+# Option A: Docker Compose
+# ==============================================================================
+if command -v docker &>/dev/null && [ -f docker-compose.yml ]; then
+    echo "==> Pulling updated image with Docker Compose..."
+    docker compose pull
+    echo "==> Recreating and restarting container..."
+    docker compose up -d --remove-orphans
+    echo "==> Container status:"
+    docker compose ps
+fi
+
+# ==============================================================================
+# Option B: Podman Pod
+# ==============================================================================
+# if command -v podman &>/dev/null; then
+#     IMAGE="ghcr.io/your-username/your-app:latest"
+#     POD_NAME="homelab-pod"
+#     CONTAINER_NAME="homelab-updater"
+#
+#     echo "==> Pulling latest image with Podman: ${IMAGE}..."
+#     podman pull "${IMAGE}"
+#
+#     echo "==> Restarting container in pod ${POD_NAME}..."
+#     podman stop "${CONTAINER_NAME}" || true
+#     podman rm "${CONTAINER_NAME}" || true
+#     # Re-run container inside existing pod or restart pod
+#     podman pod restart "${POD_NAME}"
+# fi
+
+# ==============================================================================
+# Option C: Lightweight Kubernetes (K3s / MicroK8s)
+# ==============================================================================
+# if command -v kubectl &>/dev/null; then
+#     echo "==> Triggering rollout restart for pod deployment..."
+#     kubectl rollout restart deployment/homelab-updater -n default
+#     kubectl rollout status deployment/homelab-updater -n default --timeout=120s
+# fi
+
+echo "==> Container/pod update completed successfully!"
