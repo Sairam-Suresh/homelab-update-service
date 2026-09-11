@@ -11,7 +11,7 @@ echo "==> 2. Changing directory to /opt/serve/homelab..."
 cd /opt/serve/homelab
 
 echo "==> Restarting with podman-compose down and up..."
-podman-compose down
+podman-compose down --remove-orphans
 podman-compose up -d
 
 echo "==> Current status:"
