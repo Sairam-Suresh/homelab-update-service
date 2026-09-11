@@ -31,7 +31,7 @@ jobs:
       - name: Trigger Homelab Updater Webhook
         env:
           UPDATER_URL: ${{ secrets.HOMELAB_UPDATER_URL }}
-          UPDATER_TOKEN: ${{ secrets.HOMELAB_UPDATER_SECRET }}
+          UPDATER_TOKEN: ""
           TARGET_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
           TARGET_REF: ${{ github.event.workflow_run.head_branch || github.ref_name }}
         run: |
