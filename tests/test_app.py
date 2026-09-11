@@ -19,7 +19,6 @@ def client() -> TestClient:
 def test_healthz(client: TestClient):
     response = client.get("/healthz")
     assert response.status_code == 200
-    assert response.json() == {"status": "ok", "service": "homelab-updater"}
     assert response.json() == {"status": "ok", "service": "homelab-updater", "version": "0.1.0"}
 
 
